@@ -74,9 +74,14 @@ Android 10 的「音訊輸入共用」規則下，其他 App 正在通話占用�
 4. 允許「略過電池最佳化」（小米、OPPO、vivo 另需在系統設定允許「自動啟動」）。
 5. 打一通電話或 LINE 測試，確認通知列出現「正在錄製」。
 
-## 5. 建置
+## 5. 安裝與建置
+
+**直接安裝**：下載 `apk/CallRecorder-0.1.0.apk` 到手機 → 點開 → 允許「安裝未知來源應用程式」→ 安裝。
+Android 13 以上若無障礙服務的開關是灰色，請到「設定 → 應用程式 → 通話錄音 → 右上角 ⋮ → 允許受限制的設定」後再開啟。
+
+**自行建置**：
 - Android Studio Ladybug 以上，JDK 17，`minSdk 29`（Android 10）、`targetSdk 35`。
-- 以 Android Studio 開啟 `android-call-recorder/` 資料夾，Sync 後直接 Run。
+- 以 Android Studio 開啟 `android-call-recorder/` 資料夾，Sync 後直接 Run；或命令列 `gradle assembleDebug`。
 - 錄音檔位置：`Android/data/tw.callrecorder/files/Recordings/`。
 
 ## 6. 法律與上架注意事項（台灣）
