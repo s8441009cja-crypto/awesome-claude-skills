@@ -4,7 +4,8 @@
 
 > 標準 Android 10 起不允許一般 App 直接錄通話音訊，但**實際效果依手機廠商與機型而定**。
 > 本 App 採用與 Cube ACR 相同的思路：**啟用無障礙服務＋多種音源可切換**。
-> 在許多手機上不開擴音也能錄到雙方；若某支手機錄不到對方，先在設定中換音源，最後才需要開擴音。
+> 預設值比照 Cube ACR：Voice recognition（軟體）音源、軟體增益、強制通信模式、電話延遲 4 秒錄音，
+> 在許多手機上不開擴音也能錄到雙方。
 
 ## 1. 架構
 
@@ -27,8 +28,8 @@
 | `CallAccessibilityService.kt` | 無障礙服務；監聽電話狀態並觸發錄音 |
 | `VoipCallListenerService.kt` | 通知監聽；以「通話中」通知判斷 VoIP 通話開始/結束 |
 | `RecordingService.kt` | 前景服務；建立檔名 `時間_來源_對象.m4a`，啟停錄音 |
-| `CallAudioRecorder.kt` | MediaRecorder 包裝；依序嘗試 `VOICE_CALL → VOICE_RECOGNITION → MIC` |
-| `Recordings.kt` | 檔案目錄與各來源開關設定 |
+| `CallAudioRecorder.kt` | 軟體錄音：AudioRecord → 增益放大 → MediaCodec AAC → .m4a；音源失敗自動退回 |
+| `Recordings.kt` | 檔案目錄與設定（各來源開關、電話／VoIP 兩組錄製設定） |
 | `MainActivity.kt` | 主畫面 |
 
 ## 2. 如何偵測各種通話
@@ -51,8 +52,17 @@ VoIP App 沒有公開 API 告知「通話中」，讀它們的通話通知是最
 
 Android 10 的「音訊輸入共用」規則下，其他 App 正在通話占用麥克風時，一般 App 會收到靜音；**無障礙服務例外**，這就是本 App 必須啟用無障礙服務的原因。
 
-**自動模式順序**：`VOICE_CALL → VOICE_RECOGNITION → VOICE_COMMUNICATION → MIC`。每個來源（電話、LINE…）都可在主畫面各自指定音源。
-建議測試方式：分別打一通電話和 LINE，不開擴音，聽錄音檔；若對方聲音太小或無聲，換下一個音源再試。
+### 錄製設定（參考 Cube ACR 在實機上可不開擴音錄雙方的設定）
+
+| 設定 | 電話 | VoIP | 預設 | 原理 |
+|---|---|---|---|---|
+| 錄音音源 | ✅ | ✅ | Voice recognition (software) | 不做回音消除，聽筒漏到麥克風的對方聲音不會被濾掉 |
+| 清晰度提高 | ✅ | ✅ | +12 dB（0–24） | 軟體放大 PCM，把偏小的對方聲音拉起來；過高會增加底噪 |
+| 強制通信模式 | ✅ | — | 開 | 錄音期間 `AudioManager.mode = MODE_IN_COMMUNICATION`；對方聲音變小時請關閉 |
+| 自動錄製延遲 | ✅ | — | 4 秒 | 接通瞬間音訊路由仍在切換，延後開始可避免對方聲音變小 |
+
+音源失敗時的自動退回順序：`VOICE_RECOGNITION → VOICE_CALL → VOICE_COMMUNICATION → MIC`。
+建議調整方式：不開擴音各打一通電話與 LINE，聽錄音檔；對方太小聲就調高增益，仍不行再換音源或切換強制通信模式。
 
 ### 進階：root 版本
 在 root（Magisk）手機上把 App 安裝為 priv-app 並授予 `CAPTURE_AUDIO_OUTPUT`，`CallAudioRecorder` 會自動優先使用 `VOICE_CALL`，電信電話可雙方清楚錄音；VoIP 仍需走麥克風。

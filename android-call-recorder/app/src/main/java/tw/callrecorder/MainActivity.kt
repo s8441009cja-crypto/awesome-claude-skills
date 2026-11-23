@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.Spinner
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -61,7 +62,7 @@ class MainActivity : AppCompatActivity() {
         step("略過電池最佳化（避免背景被殺）", isIgnoringBattery()) {
             startActivity(Intent(SysSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
-        text("提示：若錄不到對方聲音，請在下方為該來源換一個音源再試；都不行時才需要開擴音。")
+        text("提示：不開擴音時，若對方聲音太小，請調高「清晰度提高」或換音源。")
 
         header("2. 自動錄音來源")
         CallSource.entries.forEach { s ->
@@ -70,20 +71,38 @@ class MainActivity : AppCompatActivity() {
                 isChecked = Settings.isEnabled(this@MainActivity, s)
                 setOnCheckedChangeListener { _, on -> Settings.setEnabled(this@MainActivity, s, on) }
             })
+        }
+
+        header("3. 錄製設定")
+        Group.entries.forEach { g ->
+            subheader("${g.label}錄音")
             val keys = CallAudioRecorder.OPTIONS.keys.toList()
+            text("${g.label}錄音音源")
             root.addView(Spinner(this).apply {
-                adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item,
-                    CallAudioRecorder.OPTIONS.values.map { "音源：$it" })
-                setSelection(keys.indexOf(Settings.audioSource(context, s)).coerceAtLeast(0))
+                adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, CallAudioRecorder.OPTIONS.values.toList())
+                setSelection(keys.indexOf(Settings.audioSource(context, g)).coerceAtLeast(0))
                 onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                     override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) =
-                        Settings.setAudioSource(context, s, keys[pos])
+                        Settings.setAudioSource(context, g, keys[pos])
                     override fun onNothingSelected(p: AdapterView<*>?) = Unit
                 }
             })
+            slider("${g.label}清晰度提高（軟體增益）", Settings.MAX_GAIN_DB, Settings.gainDb(this, g), { "+$it dB" }) {
+                Settings.setGainDb(this, g, it)
+            }
+            if (g == Group.PHONE) {
+                root.addView(Switch(this).apply {
+                    text = "強制通信模式（若對方聲音變小請關閉）"
+                    isChecked = Settings.forceCommMode(context)
+                    setOnCheckedChangeListener { _, on -> Settings.setForceCommMode(context, on) }
+                })
+                slider("電話自動錄製延遲", Settings.MAX_DELAY_S, (Settings.phoneDelayMs(this) / 1000).toInt(), { "$it 秒" }) {
+                    Settings.setPhoneDelayMs(this, it * 1000L)
+                }
+            }
         }
 
-        header("3. 錄音檔")
+        header("4. 錄音檔")
         val files = Recordings.list(this)
         if (files.isEmpty()) text("尚無錄音")
         files.forEach { f ->
@@ -120,6 +139,20 @@ class MainActivity : AppCompatActivity() {
         getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
 
     private fun header(t: String) = root.addView(TextView(this).apply { text = t; textSize = 20f; setPadding(0, 32, 0, 8) })
+    private fun subheader(t: String) = root.addView(TextView(this).apply { text = t; textSize = 17f; setPadding(0, 24, 0, 4) })
+    private fun slider(label: String, max: Int, value: Int, fmt: (Int) -> String, onChange: (Int) -> Unit) {
+        val tv = TextView(this).apply { text = "$label：${fmt(value)}" }
+        root.addView(tv)
+        root.addView(SeekBar(this).apply {
+            this.max = max
+            progress = value
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, v: Int, fromUser: Boolean) { tv.text = "$label：${fmt(v)}"; onChange(v) }
+                override fun onStartTrackingTouch(sb: SeekBar?) = Unit
+                override fun onStopTrackingTouch(sb: SeekBar?) = Unit
+            })
+        })
+    }
     private fun text(t: String) = root.addView(TextView(this).apply { text = t })
     private fun step(label: String, done: Boolean, onClick: () -> Unit) =
         root.addView(Button(this).apply {

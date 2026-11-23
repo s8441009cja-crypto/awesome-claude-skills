@@ -1,86 +1,171 @@
 package tw.callrecorder
 
-import android.content.Context
+import android.annotation.SuppressLint
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.util.Log
 import java.io.File
+import java.nio.ByteOrder
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
- * 依序嘗試不同音源，第一個能成功 start() 的就採用；使用者也可在設定中為每個來源指定音源。
+ * 「軟體」錄音器（對應 Cube ACR 的 "Voice recognition (software)"）：
+ * AudioRecord 取得 PCM → 軟體增益放大 → MediaCodec 編成 AAC → MediaMuxer 存成 .m4a。
  *
- * - VOICE_CALL：直接錄通話音訊（雙方）。標準 Android 需系統權限，但不少廠商 ROM
- *   對啟用無障礙服務的 App 放行。
- * - VOICE_RECOGNITION / UNPROCESSED：不經回音消除的麥克風。許多機型在這個路徑下，
- *   聽筒的聲音仍收得到，所以不開擴音也能錄到對方。
- * - VOICE_COMMUNICATION / MIC：部分機型的替代選擇。
- *
- * 注意：某些手機上 VOICE_CALL 會「成功啟動但錄到靜音」，這時請在設定中手動換音源。
+ * 不開擴音時，對方聲音是從聽筒漏進麥克風，音量很小；
+ * VOICE_RECOGNITION 音源不做回音消除，所以收得到，再靠軟體增益放大到聽得清楚。
  */
-class CallAudioRecorder(private val context: Context) {
+class CallAudioRecorder {
 
-    private var recorder: MediaRecorder? = null
+    @Volatile private var running = false
+    private var worker: Thread? = null
     var usedSource: Int = -1
         private set
 
-    fun start(output: File, source: CallSource): Boolean {
-        val chosen = Settings.audioSource(context, source)
-        val candidates = if (chosen != AUTO) listOf(chosen) + AUTO_ORDER.filter { it != chosen } else AUTO_ORDER
-        for (audioSource in candidates) {
-            val r = MediaRecorder(context)
-            try {
-                r.setAudioSource(audioSource)
-                r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                r.setAudioChannels(1)
-                r.setAudioSamplingRate(44_100)
-                r.setAudioEncodingBitRate(96_000)
-                r.setOutputFile(output.absolutePath)
-                r.prepare()
-                r.start()
-                recorder = r
-                usedSource = audioSource
-                Log.i(TAG, "錄音開始，音源=$audioSource，檔案=${output.name}")
-                return true
-            } catch (e: Exception) {
-                Log.w(TAG, "音源 $audioSource 無法使用：${e.message}")
-                r.release()
-                output.delete()
-            }
+    /** @param preferredSource 使用者選的音源；失敗時依 AUTO_ORDER 往下試。 */
+    fun start(output: File, preferredSource: Int, gainDb: Int): Boolean {
+        val candidates = (listOf(preferredSource) + AUTO_ORDER).filter { it != AUTO }.distinct()
+        for (src in candidates) {
+            val record = open(src) ?: continue
+            usedSource = src
+            running = true
+            worker = Thread({ encodeLoop(record, output, gainDb) }, "call-recorder").apply { start() }
+            Log.i(TAG, "錄音開始：音源=${OPTIONS[src]}，增益=${gainDb}dB，檔案=${output.name}")
+            return true
         }
         return false
     }
 
     fun stop() {
-        recorder?.let {
-            try { it.stop() } catch (e: RuntimeException) { Log.w(TAG, "stop 失敗（錄音太短？）", e) }
-            it.release()
+        running = false
+        worker?.join(3_000)
+        worker = null
+    }
+
+    @SuppressLint("MissingPermission") // RECORD_AUDIO 已於 MainActivity 申請
+    private fun open(source: Int): AudioRecord? {
+        val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val record = try {
+            AudioRecord(source, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, minBuf * 4)
+        } catch (e: Exception) {
+            Log.w(TAG, "音源 ${OPTIONS[source]} 無法建立：${e.message}")
+            return null
         }
-        recorder = null
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release(); return null
+        }
+        try {
+            record.startRecording()
+        } catch (e: IllegalStateException) {
+            record.release(); return null
+        }
+        if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            record.release(); return null
+        }
+        return record
+    }
+
+    private fun encodeLoop(record: AudioRecord, output: File, gainDb: Int) {
+        val gain = 10.0.pow(gainDb / 20.0).toFloat()
+        val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, SAMPLE_RATE, 1).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16 * 1024)
+        }
+        val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        codec.start()
+        val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var track = -1
+        var muxerStarted = false
+        val info = MediaCodec.BufferInfo()
+        var samplesWritten = 0L
+        val pcm = ShortArray(2048)
+        var eosQueued = false
+
+        try {
+            while (true) {
+                // 1) 餵 PCM 給編碼器
+                if (!eosQueued) {
+                    val inIdx = codec.dequeueInputBuffer(10_000)
+                    if (inIdx >= 0) {
+                        val buf = codec.getInputBuffer(inIdx)!!.order(ByteOrder.nativeOrder())
+                        buf.clear()
+                        val pts = samplesWritten * 1_000_000L / SAMPLE_RATE
+                        if (!running) {
+                            codec.queueInputBuffer(inIdx, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            eosQueued = true
+                        } else {
+                            val want = minOf(pcm.size, buf.capacity() / 2)
+                            val n = record.read(pcm, 0, want)
+                            if (n > 0) {
+                                for (i in 0 until n) {
+                                    val v = (pcm[i] * gain).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                                    buf.putShort(v.toShort())
+                                }
+                                codec.queueInputBuffer(inIdx, 0, n * 2, pts, 0)
+                                samplesWritten += n
+                            } else {
+                                codec.queueInputBuffer(inIdx, 0, 0, pts, 0)
+                            }
+                        }
+                    }
+                }
+                // 2) 取出 AAC 寫入檔案
+                var outIdx = codec.dequeueOutputBuffer(info, 0)
+                while (outIdx != MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        track = muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                        muxerStarted = true
+                    } else if (outIdx >= 0) {
+                        val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
+                        if (muxerStarted && !isConfig && info.size > 0) {
+                            muxer.writeSampleData(track, codec.getOutputBuffer(outIdx)!!, info)
+                        }
+                        codec.releaseOutputBuffer(outIdx, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
+                    }
+                    outIdx = codec.dequeueOutputBuffer(info, 0)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "錄音中斷", e)
+        } finally {
+            record.stop(); record.release()
+            codec.stop(); codec.release()
+            if (muxerStarted) muxer.stop()
+            muxer.release()
+            if (samplesWritten == 0L) output.delete()
+        }
     }
 
     companion object {
         private const val TAG = "CallAudioRecorder"
+        private const val SAMPLE_RATE = 44_100
         const val AUTO = -1
 
-        /**
-         * 自動模式的嘗試順序。VOICE_CALL 也套用在 VoIP：部分廠商 ROM（如部分三星、小米機型）
-         * 在 App 啟用無障礙服務時允許這個音源，可不開擴音就錄到雙方。
-         */
         val AUTO_ORDER = listOf(
-            MediaRecorder.AudioSource.VOICE_CALL,
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.VOICE_CALL,
             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
             MediaRecorder.AudioSource.MIC,
         )
 
-        /** 給設定畫面用的選項（與 Cube ACR 的「錄音音源」設定相同概念）。 */
+        /** 設定畫面的音源選項（與 Cube ACR 的「錄音音源」同概念）。 */
         val OPTIONS = linkedMapOf(
-            AUTO to "自動",
+            MediaRecorder.AudioSource.VOICE_RECOGNITION to "Voice recognition (software)",
             MediaRecorder.AudioSource.VOICE_CALL to "Voice call",
-            MediaRecorder.AudioSource.VOICE_RECOGNITION to "Voice recognition",
             MediaRecorder.AudioSource.VOICE_COMMUNICATION to "Voice communication",
             MediaRecorder.AudioSource.MIC to "Mic",
             MediaRecorder.AudioSource.UNPROCESSED to "Unprocessed",
+            AUTO to "自動",
         )
     }
 }

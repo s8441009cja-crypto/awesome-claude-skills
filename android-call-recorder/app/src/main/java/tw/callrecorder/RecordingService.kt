@@ -7,6 +7,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -19,7 +22,9 @@ import java.util.Locale
 class RecordingService : Service() {
 
     private var recorder: CallAudioRecorder? = null
-    private var currentFile: File? = null
+    private var pendingStart: Runnable? = null
+    private var savedAudioMode: Int? = null
+    private val handler = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -36,31 +41,56 @@ class RecordingService : Service() {
     }
 
     private fun startRecording(source: CallSource, peer: String?) {
-        if (recorder != null) return // 已在錄音（例如電話＋通知同時觸發）
+        if (recorder != null || pendingStart != null) return // 已在錄音（例如電話＋通知同時觸發）
+        // startForegroundService 後須在 5 秒內呼叫 startForeground，所以先進前景再延遲錄音
         ServiceCompat.startForeground(
             this, NOTIF_ID, buildNotification("正在錄製 ${source.label} 通話"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
         )
-        val file = File(Recordings.dir(this), fileName(source, peer))
-        val r = CallAudioRecorder(this)
-        if (r.start(file, source)) {
-            recorder = r
-            currentFile = file
-        } else {
-            stopSelf()
+        val group = source.group
+        val task = Runnable {
+            pendingStart = null
+            if (group == Group.PHONE && Settings.forceCommMode(this)) enterCommMode()
+            val file = File(Recordings.dir(this), fileName(source, peer))
+            val r = CallAudioRecorder()
+            if (r.start(file, Settings.audioSource(this, group), Settings.gainDb(this, group))) {
+                recorder = r
+            } else {
+                stopRecording()
+            }
         }
+        // 電話接通瞬間音訊路由還在切換，延遲幾秒再錄可避免對方聲音變小（同 Cube ACR）
+        val delay = if (group == Group.PHONE) Settings.phoneDelayMs(this) else 0L
+        pendingStart = task
+        handler.postDelayed(task, delay)
     }
 
     private fun stopRecording() {
+        pendingStart?.let { handler.removeCallbacks(it) }
+        pendingStart = null
         recorder?.stop()
         recorder = null
-        currentFile = null
+        restoreAudioMode()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
+    /** 強制通信模式：錄音期間把音訊模式設為 MODE_IN_COMMUNICATION，改善 Android 10+ 的電話錄音。 */
+    private fun enterCommMode() {
+        val am = getSystemService(AudioManager::class.java)
+        savedAudioMode = am.mode
+        am.mode = AudioManager.MODE_IN_COMMUNICATION
+    }
+
+    private fun restoreAudioMode() {
+        savedAudioMode?.let { getSystemService(AudioManager::class.java).mode = it }
+        savedAudioMode = null
+    }
+
     override fun onDestroy() {
+        pendingStart?.let { handler.removeCallbacks(it) }
         recorder?.stop()
+        restoreAudioMode()
         super.onDestroy()
     }
 
