@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">通話錄音</string>
+    <string name="accessibility_desc">讓「通話錄音」能在電話、LINE、Messenger、Telegram 通話期間同時使用麥克風錄音。本服務不讀取畫面內容。</string>
+</resources>
