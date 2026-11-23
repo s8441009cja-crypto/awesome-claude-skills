@@ -10,7 +10,10 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings as SysSettings
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
+import android.widget.Spinner
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -58,7 +61,7 @@ class MainActivity : AppCompatActivity() {
         step("略過電池最佳化（避免背景被殺）", isIgnoringBattery()) {
             startActivity(Intent(SysSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
-        text("提示：LINE 等網路通話建議開啟擴音，才能清楚錄到對方聲音。")
+        text("提示：若錄不到對方聲音，請在下方為該來源換一個音源再試；都不行時才需要開擴音。")
 
         header("2. 自動錄音來源")
         CallSource.entries.forEach { s ->
@@ -66,6 +69,17 @@ class MainActivity : AppCompatActivity() {
                 text = s.label
                 isChecked = Settings.isEnabled(this@MainActivity, s)
                 setOnCheckedChangeListener { _, on -> Settings.setEnabled(this@MainActivity, s, on) }
+            })
+            val keys = CallAudioRecorder.OPTIONS.keys.toList()
+            root.addView(Spinner(this).apply {
+                adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item,
+                    CallAudioRecorder.OPTIONS.values.map { "音源：$it" })
+                setSelection(keys.indexOf(Settings.audioSource(context, s)).coerceAtLeast(0))
+                onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p: AdapterView<*>?, v: android.view.View?, pos: Int, id: Long) =
+                        Settings.setAudioSource(context, s, keys[pos])
+                    override fun onNothingSelected(p: AdapterView<*>?) = Unit
+                }
             })
         }
 

@@ -6,14 +6,15 @@ import android.util.Log
 import java.io.File
 
 /**
- * 依序嘗試不同音源，第一個能成功 start() 的就採用。
+ * 依序嘗試不同音源，第一個能成功 start() 的就採用；使用者也可在設定中為每個來源指定音源。
  *
- * - VOICE_CALL：可同時錄到雙方聲音（上行＋下行），但一般 App 在 Android 9+ 沒有
- *   CAPTURE_AUDIO_OUTPUT 權限，只有 root／系統 App／部分廠商 ROM 才會成功。
- *   且只對「電信電話」有效，LINE 等 VoIP 不走這條路。
- * - VOICE_RECOGNITION：未經降噪處理的麥克風，搭配無障礙服務可在通話中同時收音，
- *   對方聲音需要靠喇叭（建議開擴音）傳回麥克風才錄得到。
- * - MIC：最後退路。
+ * - VOICE_CALL：直接錄通話音訊（雙方）。標準 Android 需系統權限，但不少廠商 ROM
+ *   對啟用無障礙服務的 App 放行。
+ * - VOICE_RECOGNITION / UNPROCESSED：不經回音消除的麥克風。許多機型在這個路徑下，
+ *   聽筒的聲音仍收得到，所以不開擴音也能錄到對方。
+ * - VOICE_COMMUNICATION / MIC：部分機型的替代選擇。
+ *
+ * 注意：某些手機上 VOICE_CALL 會「成功啟動但錄到靜音」，這時請在設定中手動換音源。
  */
 class CallAudioRecorder(private val context: Context) {
 
@@ -22,11 +23,8 @@ class CallAudioRecorder(private val context: Context) {
         private set
 
     fun start(output: File, source: CallSource): Boolean {
-        val candidates = buildList {
-            if (source == CallSource.PHONE) add(MediaRecorder.AudioSource.VOICE_CALL)
-            add(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            add(MediaRecorder.AudioSource.MIC)
-        }
+        val chosen = Settings.audioSource(context, source)
+        val candidates = if (chosen != AUTO) listOf(chosen) + AUTO_ORDER.filter { it != chosen } else AUTO_ORDER
         for (audioSource in candidates) {
             val r = MediaRecorder(context)
             try {
@@ -60,5 +58,29 @@ class CallAudioRecorder(private val context: Context) {
         recorder = null
     }
 
-    companion object { private const val TAG = "CallAudioRecorder" }
+    companion object {
+        private const val TAG = "CallAudioRecorder"
+        const val AUTO = -1
+
+        /**
+         * 自動模式的嘗試順序。VOICE_CALL 也套用在 VoIP：部分廠商 ROM（如部分三星、小米機型）
+         * 在 App 啟用無障礙服務時允許這個音源，可不開擴音就錄到雙方。
+         */
+        val AUTO_ORDER = listOf(
+            MediaRecorder.AudioSource.VOICE_CALL,
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+            MediaRecorder.AudioSource.MIC,
+        )
+
+        /** 給設定畫面用的選項（與 Cube ACR 的「錄音音源」設定相同概念）。 */
+        val OPTIONS = linkedMapOf(
+            AUTO to "自動",
+            MediaRecorder.AudioSource.VOICE_CALL to "Voice call",
+            MediaRecorder.AudioSource.VOICE_RECOGNITION to "Voice recognition",
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION to "Voice communication",
+            MediaRecorder.AudioSource.MIC to "Mic",
+            MediaRecorder.AudioSource.UNPROCESSED to "Unprocessed",
+        )
+    }
 }

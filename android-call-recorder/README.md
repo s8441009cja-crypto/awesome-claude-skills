@@ -2,10 +2,9 @@
 
 支援自動錄音：**一般電話、LINE、Messenger、Telegram**（另附 WhatsApp）。
 
-> ⚠️ 先講結論：Android 10 起，Google 從系統層封鎖一般 App 直接錄「通話音訊流」。
-> 本設計採用目前沒有 root 也能用的做法：**無障礙服務＋麥克風收音**。
-> 你的聲音一定錄得到；**對方的聲音要靠喇叭傳回麥克風**，所以強烈建議通話時開擴音。
-> 若要「雙方都清楚、不開擴音」，只有 root 手機或手機廠商內建錄音（如三星、小米、ASUS 部分機型）能做到。
+> 標準 Android 10 起不允許一般 App 直接錄通話音訊，但**實際效果依手機廠商與機型而定**。
+> 本 App 採用與 Cube ACR 相同的思路：**啟用無障礙服務＋多種音源可切換**。
+> 在許多手機上不開擴音也能錄到雙方；若某支手機錄不到對方，先在設定中換音源，最後才需要開擴音。
 
 ## 1. 架構
 
@@ -47,9 +46,13 @@ VoIP App 沒有公開 API 告知「通話中」，讀它們的通話通知是最
 |---|---|---|
 | `AudioSource.VOICE_CALL` | ❌ 需 `CAPTURE_AUDIO_OUTPUT`（系統權限），僅 root / 系統 App | ✅ 雙方清楚，僅限電信電話 |
 | `AudioPlaybackCapture`（錄系統播放聲音） | ✅ | ❌ 系統明文排除 `USAGE_VOICE_COMMUNICATION`，LINE 等通話聲音抓不到 |
-| 麥克風 + 無障礙服務（本設計） | ✅ | ⚠️ 需開擴音，靠麥克風收到喇叭聲 |
+| 無障礙服務 + `VOICE_CALL` | 視廠商 ROM | ✅ 有放行的機型可錄雙方 |
+| 無障礙服務 + `VOICE_RECOGNITION` / `UNPROCESSED` | ✅ | ✅/⚠️ 多數機型不經回音消除，聽筒聲也收得到；少數機型需開擴音 |
 
 Android 10 的「音訊輸入共用」規則下，其他 App 正在通話占用麥克風時，一般 App 會收到靜音；**無障礙服務例外**，這就是本 App 必須啟用無障礙服務的原因。
+
+**自動模式順序**：`VOICE_CALL → VOICE_RECOGNITION → VOICE_COMMUNICATION → MIC`。每個來源（電話、LINE…）都可在主畫面各自指定音源。
+建議測試方式：分別打一通電話和 LINE，不開擴音，聽錄音檔；若對方聲音太小或無聲，換下一個音源再試。
 
 ### 進階：root 版本
 在 root（Magisk）手機上把 App 安裝為 priv-app 並授予 `CAPTURE_AUDIO_OUTPUT`，`CallAudioRecorder` 會自動優先使用 `VOICE_CALL`，電信電話可雙方清楚錄音；VoIP 仍需走麥克風。

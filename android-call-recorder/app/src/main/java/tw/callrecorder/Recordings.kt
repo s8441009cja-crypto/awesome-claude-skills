@@ -17,4 +17,8 @@ object Settings {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
     fun isEnabled(ctx: Context, s: CallSource) = prefs(ctx).getBoolean(s.name, true)
     fun setEnabled(ctx: Context, s: CallSource, on: Boolean) = prefs(ctx).edit().putBoolean(s.name, on).apply()
+
+    /** 每個通話來源可各自指定音源；不同手機、不同 App 最適合的音源不一樣。 */
+    fun audioSource(ctx: Context, s: CallSource) = prefs(ctx).getInt("src_${s.name}", CallAudioRecorder.AUTO)
+    fun setAudioSource(ctx: Context, s: CallSource, v: Int) = prefs(ctx).edit().putInt("src_${s.name}", v).apply()
 }
