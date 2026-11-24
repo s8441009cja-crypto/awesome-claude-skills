@@ -19,6 +19,8 @@ class VoipCallListenerService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         EventLog.add(this, "通知存取已連線（可偵測 LINE / Messenger / Telegram）")
+        // 通知存取服務被系統重新綁定時，順便檢查無障礙服務是否也活著
+        AccessibilityHealer.checkSoon(this)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -30,6 +32,10 @@ class VoipCallListenerService : NotificationListenerService() {
         val ongoing = isOngoingCall(n)
         if (sbn.key !in activeKeys) {
             EventLog.add(this, "${source.label} 通話通知：${describe(n)} → ${if (ongoing) "通話中" else "非通話中（略過）"}")
+        }
+        if (ongoing && CallAccessibilityService.instance == null) {
+            EventLog.add(this, "通話中但無障礙服務未運作，錄音可能錄不到聲音")
+            AccessibilityHealer.check(this)
         }
         if (ongoing && activeKeys.add(sbn.key)) {
             val peer = n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()

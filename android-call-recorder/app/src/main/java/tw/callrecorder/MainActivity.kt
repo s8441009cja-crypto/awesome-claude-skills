@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         CallAccessibilityService.instance?.ensureListening()
+        if (isAccessibilityOn()) AccessibilityHealer.checkSoon(this, 1_500)
         render()
     }
 
@@ -134,6 +135,8 @@ class MainActivity : AppCompatActivity() {
 
         header("5. 診斷記錄")
         text(if (isAccessibilityOn()) "無障礙服務：${if (CallAccessibilityService.instance != null) "執行中" else "已開啟但未執行（請關閉再重新開啟）"}" else "無障礙服務：未開啟")
+        text(if (AccessibilityHealer.canSelfHeal(this)) "自動修復：✅ 已啟用（服務停止時會自動重新開啟）"
+             else "自動修復：未啟用。手機接電腦後執行一次：\n${AccessibilityHealer.ADB_GRANT_CMD}")
         root.addView(LinearLayout(this).apply {
             addView(Button(context).apply { text = "重新整理"; setOnClickListener { render() } })
             addView(Button(context).apply { text = "複製"; setOnClickListener {
@@ -151,7 +154,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun play(f: java.io.File) {
         player?.release()
-        player = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
+        player = null
+        try {
+            player = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
+        } catch (e: Exception) {
+            EventLog.add(this, "無法播放 ${f.name}（可能仍在錄音或檔案損毀）", e)
+            android.widget.Toast.makeText(this, "無法播放此檔案", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun share(f: java.io.File) {
