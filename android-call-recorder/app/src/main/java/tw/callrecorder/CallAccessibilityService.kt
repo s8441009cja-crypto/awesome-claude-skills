@@ -28,6 +28,8 @@ class CallAccessibilityService : AccessibilityService() {
         instance = this
         EventLog.add(this, "無障礙服務已啟動")
         ensureListening()
+        // 無障礙服務最常駐，由它負責確認通知存取（LINE 等偵測）有連上
+        NotificationListenerHealer.checkSoon(this)
     }
 
     /** 權限可能在服務啟動後才授予，所以主畫面回到前景時會再呼叫一次。 */
@@ -60,7 +62,10 @@ class CallAccessibilityService : AccessibilityService() {
         if (state == lastState) return
         lastState = state
         when (state) {
-            TelephonyManager.CALL_STATE_OFFHOOK -> RecorderController.start(this, CallSource.PHONE, null)
+            TelephonyManager.CALL_STATE_OFFHOOK -> {
+                RecorderController.start(this, CallSource.PHONE, null)
+                NotificationListenerHealer.check(this)
+            }
             TelephonyManager.CALL_STATE_IDLE -> RecorderController.stop(this)
         }
     }

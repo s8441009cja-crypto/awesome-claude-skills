@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         CallAccessibilityService.instance?.ensureListening()
         if (isAccessibilityOn()) AccessibilityHealer.checkSoon(this, 1_500)
+        if (isNotificationListenerOn()) NotificationListenerHealer.checkSoon(this, 1_500)
         render()
     }
 
@@ -135,6 +136,7 @@ class MainActivity : AppCompatActivity() {
 
         header("5. 診斷記錄")
         text(if (isAccessibilityOn()) "無障礙服務：${if (CallAccessibilityService.instance != null) "執行中" else "已開啟但未執行（請關閉再重新開啟）"}" else "無障礙服務：未開啟")
+        text(if (isNotificationListenerOn()) "通知存取：${if (VoipCallListenerService.connected) "已連線" else "已開啟但未連線（正在自動重新連線）"}" else "通知存取：未開啟")
         text(if (AccessibilityHealer.canSelfHeal(this)) "自動修復：✅ 已啟用（服務停止時會自動重新開啟）"
              else "自動修復：未啟用。手機接電腦後執行一次：\n${AccessibilityHealer.ADB_GRANT_CMD}")
         root.addView(LinearLayout(this).apply {

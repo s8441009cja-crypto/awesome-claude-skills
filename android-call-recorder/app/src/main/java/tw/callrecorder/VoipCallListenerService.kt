@@ -18,9 +18,16 @@ class VoipCallListenerService : NotificationListenerService() {
     private val activeKeys = mutableSetOf<String>()
 
     override fun onListenerConnected() {
+        connected = true
         EventLog.add(this, "通知存取已連線（可偵測 LINE / Messenger / Telegram）")
         // 通知存取服務被系統重新綁定時，順便檢查無障礙服務是否也活著
         AccessibilityHealer.checkSoon(this)
+    }
+
+    override fun onListenerDisconnected() {
+        connected = false
+        EventLog.add(this, "通知存取已斷線 → 要求系統重新連線")
+        NotificationListenerHealer.rebind(this)
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -69,6 +76,8 @@ class VoipCallListenerService : NotificationListenerService() {
     }
 
     companion object {
+        @Volatile var connected = false
+            private set
         private const val EXTRA_CALL_TYPE = "android.callType"
         private const val CALL_TYPE_ONGOING = 2
     }
