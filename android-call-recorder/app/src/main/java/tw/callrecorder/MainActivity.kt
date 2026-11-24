@@ -3,7 +3,6 @@ package tw.callrecorder
 import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
-import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -26,13 +25,13 @@ import androidx.core.app.NotificationManagerCompat
 class MainActivity : AppCompatActivity() {
 
     private lateinit var root: LinearLayout
-    private var player: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(40, 40, 40, 40) }
         setContentView(ScrollView(this).apply { addView(root) })
         requestRuntimePermissions()
+        Recordings.migrate(this)
     }
 
     override fun onResume() {
@@ -55,7 +54,12 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_CALL_LOG,
         )
-        if (Build.VERSION.SDK_INT >= 33) perms += Manifest.permission.POST_NOTIFICATIONS
+        if (Build.VERSION.SDK_INT >= 33) {
+            perms += Manifest.permission.POST_NOTIFICATIONS
+            perms += Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            perms += Manifest.permission.READ_EXTERNAL_STORAGE
+        }
         requestPermissions(perms.toTypedArray(), 1)
     }
 
@@ -123,18 +127,20 @@ class MainActivity : AppCompatActivity() {
                 render()
             }
         })
-        val files = Recordings.list(this)
-        if (files.isEmpty()) text("尚無錄音")
-        files.forEach { f ->
-            text("${f.nameWithoutExtension}\n${f.length() / 1024} KB")
-            root.addView(LinearLayout(this).apply {
-                addView(Button(context).apply { text = "播放"; setOnClickListener { play(f) } })
-                addView(Button(context).apply { text = "分享"; setOnClickListener { share(f) } })
-                addView(Button(context).apply { text = "刪除"; setOnClickListener { f.delete(); render() } })
+        text("錄音檔：共 ${Recordings.count(this)} 個（${Recordings.relativePath}）")
+        root.addView(LinearLayout(this).apply {
+            addView(Button(context).apply {
+                text = "開啟錄音資料夾"
+                setOnClickListener { startActivity(Intent(context, RecordingsActivity::class.java)) }
             })
-        }
+            addView(Button(context).apply {
+                text = "在檔案管理員中開啟"
+                setOnClickListener { RecordingsActivity.openInFileManager(this@MainActivity) }
+            })
+        })
 
         header("5. 診斷記錄")
+        text("版本：${packageManager.getPackageInfo(packageName, 0).versionName}")
         text(if (isAccessibilityOn()) "無障礙服務：${if (CallAccessibilityService.instance != null) "執行中" else "已開啟但未執行（請關閉再重新開啟）"}" else "無障礙服務：未開啟")
         text(if (isNotificationListenerOn()) "通知存取：${if (VoipCallListenerService.connected) "已連線" else "已開啟但未連線（正在自動重新連線）"}" else "通知存取：未開啟")
         text(if (AccessibilityHealer.canSelfHeal(this)) "自動修復：✅ 已啟用（服務停止時會自動重新開啟）"
@@ -152,24 +158,6 @@ class MainActivity : AppCompatActivity() {
             textSize = 11f
             setTextIsSelectable(true)
         })
-    }
-
-    private fun play(f: java.io.File) {
-        player?.release()
-        player = null
-        try {
-            player = MediaPlayer().apply { setDataSource(f.absolutePath); prepare(); start() }
-        } catch (e: Exception) {
-            EventLog.add(this, "無法播放 ${f.name}（可能仍在錄音或檔案損毀）", e)
-            android.widget.Toast.makeText(this, "無法播放此檔案", android.widget.Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private fun share(f: java.io.File) {
-        val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.files", f)
-        startActivity(Intent.createChooser(
-            Intent(Intent.ACTION_SEND).setType("audio/mp4").putExtra(Intent.EXTRA_STREAM, uri)
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "分享錄音"))
     }
 
     private fun isAccessibilityOn(): Boolean {
@@ -206,5 +194,4 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { onClick() }
         })
 
-    override fun onDestroy() { player?.release(); super.onDestroy() }
 }

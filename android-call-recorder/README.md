@@ -82,7 +82,7 @@ Android 13 以上若無障礙服務的開關是灰色，請到「設定 → 應�
 **自行建置**：
 - Android Studio Ladybug 以上，JDK 17，`minSdk 29`（Android 10）、`targetSdk 35`。
 - 以 Android Studio 開啟 `android-call-recorder/` 資料夾，Sync 後直接 Run；或命令列 `gradle assembleDebug`。
-- 錄音檔位置：`Android/data/tw.callrecorder/files/Recordings/`。
+- 錄音檔位置：`內部儲存空間/Recordings/通話錄音/`（Android 10–11 為 `Music/通話錄音/`），檔案管理員與音樂 App 都看得到。
 
 ## 6. 法律與上架注意事項（台灣）
 - **錄音合法性**：依《通訊保障及監察法》第 29 條第 3 款，**通話一方**為非不法目的而錄音不罰；但錄製**他人之間**的通話屬違法監聽。本 App 只應用於自己參與的通話。

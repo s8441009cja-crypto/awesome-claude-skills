@@ -21,6 +21,9 @@ object RecorderController {
     private var pending: Runnable? = null
     private var savedAudioMode: Int? = null
     private var current: CallSource? = null
+    private var currentFile: File? = null
+
+    fun isWriting(f: File) = f == currentFile
 
     val isRecording get() = recorder != null
 
@@ -41,11 +44,12 @@ object RecorderController {
         val task = Runnable {
             pending = null
             if (group == Group.PHONE && Settings.forceCommMode(app)) enterCommMode(app)
-            val file = File(Recordings.dir(app), fileName(source, peer))
+            val file = File(Recordings.tempDir(app), fileName(source, peer))
             val r = CallAudioRecorder()
             val src = Settings.audioSource(app, group)
             if (r.start(file, src, Settings.gainDb(app, group))) {
                 recorder = r
+                currentFile = file
                 EventLog.add(app, "錄音開始：音源=${CallAudioRecorder.OPTIONS[r.usedSource]}，增益=+${Settings.gainDb(app, group)}dB，檔案=${file.name}")
             } else {
                 EventLog.add(app, "錄音失敗：所有音源都無法開啟（麥克風權限？無障礙服務是否開啟？）")
@@ -60,10 +64,15 @@ object RecorderController {
         val app = ctx.applicationContext
         pending?.let { handler.removeCallbacks(it); EventLog.add(app, "通話在開始錄音前就結束，取消") }
         pending = null
-        recorder?.let {
-            it.stop()
-            val last = Recordings.list(app).firstOrNull()
-            EventLog.add(app, "錄音結束：${last?.name ?: "（無檔案）"}，${(last?.length() ?: 0) / 1024} KB")
+        val file = currentFile
+        recorder?.let { r ->
+            currentFile = null
+            Thread {
+                r.stop()
+                val size = (file?.length() ?: 0) / 1024
+                val uri = file?.let { Recordings.publish(app, it) }
+                EventLog.add(app, "錄音結束：${file?.name ?: "（無檔案）"}，$size KB" + if (uri != null) "，已存到 ${Recordings.relativePath}" else "")
+            }.start()
         }
         recorder = null
         current = null

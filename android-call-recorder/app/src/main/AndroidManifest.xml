@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 讀取公開資料夾中的錄音（重新安裝後仍可看到舊檔） -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
     <!-- 只能用 adb 授予；授予後 App 可在無障礙服務「無法運作」時自動重新開啟 -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -30,6 +35,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".RecordingsActivity"
+            android:exported="false"
+            android:label="錄音資料夾" />
 
         <!-- 錄音本體：前景服務，類型為麥克風 -->
         <service
