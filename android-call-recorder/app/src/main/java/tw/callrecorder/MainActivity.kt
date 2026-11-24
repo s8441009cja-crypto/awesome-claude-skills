@@ -37,6 +37,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        CallAccessibilityService.instance?.ensureListening()
+        render()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        CallAccessibilityService.instance?.ensureListening()
         render()
     }
 
@@ -103,6 +110,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         header("4. 錄音檔")
+        root.addView(Button(this).apply {
+            text = if (RecorderController.isRecording) "停止錄音" else "測試錄音 5 秒（確認麥克風可用）"
+            setOnClickListener {
+                if (RecorderController.isRecording) RecorderController.stop(context)
+                else {
+                    RecorderController.start(context, CallSource.PHONE, "測試", delayOverrideMs = 0)
+                    root.postDelayed({ RecorderController.stop(context); render() }, 5_000)
+                }
+                render()
+            }
+        })
         val files = Recordings.list(this)
         if (files.isEmpty()) text("尚無錄音")
         files.forEach { f ->
@@ -113,6 +131,22 @@ class MainActivity : AppCompatActivity() {
                 addView(Button(context).apply { text = "刪除"; setOnClickListener { f.delete(); render() } })
             })
         }
+
+        header("5. 診斷記錄")
+        text(if (isAccessibilityOn()) "無障礙服務：${if (CallAccessibilityService.instance != null) "執行中" else "已開啟但未執行（請關閉再重新開啟）"}" else "無障礙服務：未開啟")
+        root.addView(LinearLayout(this).apply {
+            addView(Button(context).apply { text = "重新整理"; setOnClickListener { render() } })
+            addView(Button(context).apply { text = "複製"; setOnClickListener {
+                getSystemService(android.content.ClipboardManager::class.java)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("log", EventLog.read(context)))
+            } })
+            addView(Button(context).apply { text = "清除"; setOnClickListener { EventLog.clear(context); render() } })
+        })
+        root.addView(TextView(this).apply {
+            text = EventLog.read(context).lines().takeLast(60).reversed().joinToString("\n").ifBlank { "（尚無記錄）" }
+            textSize = 11f
+            setTextIsSelectable(true)
+        })
     }
 
     private fun play(f: java.io.File) {
